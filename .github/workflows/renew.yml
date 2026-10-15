@@ -1,0 +1,71 @@
+name: Auto-Renew-ACL
+on:
+  workflow_dispatch:
+  schedule:
+    - cron: '0 */23 * * *' # 每隔3天 12点(UTC 2点) 运行
+
+jobs:
+  Renew-acl:
+    runs-on: ubuntu-latest
+    timeout-minutes: 90
+    permissions:
+      contents: write
+      actions: write
+    steps:
+      - name: 📥 下载代码
+        uses: actions/checkout@v6
+      - name: 🐍 设置 Python
+        uses: actions/setup-python@v6
+        with:
+          python-version: '3.11'
+          
+      - name: 🛠️ 安装系统依赖
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y \
+            xvfb \
+            x11-utils \
+            xdotool \
+            scrot \
+            fonts-noto-cjk
+            
+      - name: 🐍 安装 Python 依赖
+        run: |
+          pip install seleniumbase aiohttp requests
+          seleniumbase install chromedriver
+
+      - name: 启用 WARP 网络
+        uses: fscarmen/warp-on-actions@v1.4
+        with:
+          stack: dual
+          mode: client
+
+      - name: 🚀 运行续期脚本
+        env:
+          # 单账号继续用 EMAIL / PASSWORD。
+          # 多账号另建 secret ACCOUNTS：JSON 数组，或每行 email|password。
+          # 配了 ACCOUNTS 就按它登录；每换一个账号，脚本会先更换 WARP IP。
+          EMAIL: ${{ secrets.EMAIL }}
+          PASSWORD: ${{ secrets.PASSWORD }}
+          ACCOUNTS: ${{ secrets.ACCOUNTS }}
+          COOKIE_VALUE: ${{ secrets.COOKIE_VALUE }}
+          TG_BOT_TOKEN: ${{ secrets.TG_BOT_TOKEN }}
+          TG_CHAT_ID: ${{ secrets.TG_CHAT_ID }}
+        run: |
+          xvfb-run --auto-servernum --server-args="-screen 0 1366x768x24" \
+            python3 app.py
+          
+      - name: 🧹 清理旧的工作流运行记录
+        if: always()
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          runs=$(gh run list --workflow="${{ github.workflow }}" --limit=100 --json databaseId --jq '.[].databaseId')
+          count=0
+          for run_id in $runs; do
+            count=$((count + 1))
+            if [ $count -gt 1 ]; then
+              echo "删除运行记录: $run_id"
+              gh run delete $run_id || true
+            fi
+          done
